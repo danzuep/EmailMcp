@@ -21,6 +21,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using MimeKit;
+using MailKitSimplified.Receiver.Extensions;
+using MailKitSimplified.Receiver.Models;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -49,7 +51,7 @@ namespace EmailMcp
             "is supplied from search_emails / list results. Returns JSON with UniqueId, " +
             "MessageId, headers, Markdown body, and attachment metadata.")]
         public static async Task<string> ReadEmailAsync(
-            [Description("Maximum number of messages to return (1–25). Ignored when uniqueId is set.")]
+            [Description("Maximum number of messages to return (1-25). Ignored when uniqueId is set.")]
             int maxResults = 5,
             [Description("IMAP folder name. Default: INBOX.")]
             string folder = "INBOX",
@@ -60,7 +62,8 @@ namespace EmailMcp
             try
             {
                 maxResults = ValidateMaxResults(maxResults);
-                using var receiver = CreateReceiver(folder);
+                var settings = ImapSettings.LoadEmailReceiverOptions(folder);
+                using var receiver = ImapReceiver.Create(settings);
 
                 if (uniqueId is null)
                 {
@@ -110,7 +113,7 @@ namespace EmailMcp
             string? searchTerm = null,
             [Description("Field to search: all, subject, from, unread, or read.")]
             string searchField = "all",
-            [Description("Maximum number of results (1–25).")]
+            [Description("Maximum number of results (1-25).")]
             int maxResults = 10,
             [Description("IMAP folder name. Default: INBOX.")]
             string folder = "INBOX",
@@ -121,7 +124,8 @@ namespace EmailMcp
                 maxResults = ValidateMaxResults(maxResults);
                 var query = BuildSearchQuery(searchTerm, searchField);
 
-                using var receiver = CreateReceiver(folder);
+                var settings = ImapSettings.LoadEmailReceiverOptions(folder);
+                using var receiver = ImapReceiver.Create(settings);
                 var summaries = await receiver.ReadFrom(folder)
                     .Query(query)
                     .ItemsForMimeMessages()
@@ -150,20 +154,10 @@ namespace EmailMcp
         {
             try
             {
-                using var receiver = CreateReceiver("INBOX");
-                // MailKitSimplified exposes the underlying client via the receiver.
-                // Use a lightweight connection and list personal namespaces.
-                var client = await OpenImapClientAsync(cancellationToken);
-                await using (client.ConfigureAwait(false))
-                {
-                    var personal = client.GetFolder(client.PersonalNamespaces[0]);
-                    var folders = await personal.GetSubfoldersAsync(false, cancellationToken);
-                    var names = new List<string> { personal.FullName };
-                    foreach (var f in folders)
-                        names.Add(f.FullName);
-
-                    return Ok(new { folders = names });
-                }
+                var settings = ImapSettings.LoadEmailReceiverOptions();
+                using var receiver = ImapReceiver.Create(settings);
+                var names = await receiver.GetMailFolderNamesAsync(cancellationToken).ConfigureAwait(false);
+                return Ok(new { folders = names });
             }
             catch (Exception ex)
             {
@@ -189,10 +183,9 @@ namespace EmailMcp
                 int? inboxCount = null;
                 try
                 {
-                    using var receiver = CreateReceiver("INBOX");
-                    var summaries = await receiver.ReadMail
-                        .Top(1)
-                        .ItemsForMimeMessages()
+                    var settings = ImapSettings.LoadEmailReceiverOptions();
+                    using var receiver = ImapReceiver.Create(settings);
+                    var summaries = await receiver.ReadMail.Top(1)
                         .GetMessageSummariesAsync(cancellationToken);
                     inboxCount = summaries.Count; // just proves connectivity; count is not total
                     _ = inboxCount;
@@ -282,13 +275,8 @@ namespace EmailMcp
 
                 var writer = sender.WriteEmail
                     .From(smtp.FromAddress ?? smtp.UserName)
-                    .To(SplitAddresses(to).ToArray())
+                    .To(to).Cc(cc).Bcc(bcc)
                     .Subject(subject);
-
-                if (!string.IsNullOrWhiteSpace(cc))
-                    writer = writer.Cc(SplitAddresses(cc).ToArray());
-                if (!string.IsNullOrWhiteSpace(bcc))
-                    writer = writer.Bcc(SplitAddresses(bcc).ToArray());
 
                 writer = isHtml ? writer.BodyHtml(body) : writer.BodyText(body);
 
@@ -347,25 +335,7 @@ namespace EmailMcp
 
         // ── helpers: connections ─────────────────────────────────────────────
 
-        private static ImapReceiver CreateReceiver(string folder)
-        {
-            var settings = ImapSettings.Load();
-            var receiver = ImapReceiver
-                .Create($"{settings.Host}:{settings.Port}")
-                .SetFolder(folder);
-
-            if (!string.IsNullOrWhiteSpace(settings.AccessToken))
-            {
-                var oauth2 = new SaslMechanismOAuth2(settings.UserName, settings.AccessToken);
-                return receiver.SetCustomAuthentication(client =>
-                    client.AuthenticateAsync(oauth2));
-            }
-
-            return receiver.SetCredential(settings.UserName, settings.Password!);
-        }
-
-        private static async Task<MailKit.Net.Imap.ImapClient> OpenImapClientAsync(
-            CancellationToken cancellationToken)
+        private static async Task<MailKit.Net.Imap.ImapClient> OpenImapClientAsync(CancellationToken cancellationToken)
         {
             var settings = ImapSettings.Load();
             var client = new MailKit.Net.Imap.ImapClient();
@@ -378,7 +348,7 @@ namespace EmailMcp
             }
             else
             {
-                await client.AuthenticateAsync(settings.UserName, settings.Password, cancellationToken);
+                await client.AuthenticateAsync(settings.UserName, settings.Password!, cancellationToken);
             }
 
             return client;
@@ -595,6 +565,34 @@ namespace EmailMcp
             string? Password,
             string? AccessToken)
         {
+            public static EmailReceiverOptions LoadEmailReceiverOptions(string? folder = null)
+            {
+                var fileSettings = LoadSettingsFile();
+
+                var userName    = GetSetting("IMAP_USER", fileSettings);
+                var password    = GetSetting("IMAP_PASSWORD", fileSettings);
+                var accessToken = GetSetting("IMAP_ACCESS_TOKEN", fileSettings);
+                var host        = GetSetting("IMAP_HOST", fileSettings);
+                var portText    = GetSetting("IMAP_PORT", fileSettings);
+
+                var receiverOptions = new EmailReceiverOptions($"{host}:{portText}");
+                if (!string.IsNullOrWhiteSpace(folder))
+                {
+                    receiverOptions.MailFolderName = folder;
+                    receiverOptions.MailFolderAccess = FolderAccess.ReadOnly;
+                }
+                if (!string.IsNullOrWhiteSpace(userName) && !string.IsNullOrWhiteSpace(accessToken))
+                {
+                    receiverOptions.AuthenticationMechanism = new SaslMechanismOAuth2(userName, accessToken);
+                }
+                else if (!string.IsNullOrWhiteSpace(password))
+                {
+                    receiverOptions.ImapCredential = new NetworkCredential(userName, password);
+                }
+
+                return receiverOptions;
+            }
+
             public static ImapSettings Load()
             {
                 var fileSettings = LoadSettingsFile();
@@ -620,6 +618,10 @@ namespace EmailMcp
                 }
 
                 var portText = GetSetting("IMAP_PORT", fileSettings);
+                if (string.IsNullOrWhiteSpace(portText))
+                {
+                    throw new InvalidOperationException("IMAP_PORT must be specified.");
+                }
                 var port = string.IsNullOrWhiteSpace(portText)
                     ? 993
                     : int.TryParse(
@@ -654,11 +656,11 @@ namespace EmailMcp
                 var fileSettings = LoadSettingsFile();
 
                 var host = GetSetting("SMTP_HOST", fileSettings)
-                           ?? GetSetting("IMAP_HOST", fileSettings);
+                    ?? GetSetting("IMAP_HOST", fileSettings);
                 var user = GetSetting("SMTP_USER", fileSettings)
-                           ?? GetSetting("IMAP_USER", fileSettings);
+                    ?? GetSetting("IMAP_USER", fileSettings);
                 var pass = GetSetting("SMTP_PASSWORD", fileSettings)
-                           ?? GetSetting("IMAP_PASSWORD", fileSettings);
+                    ?? GetSetting("IMAP_PASSWORD", fileSettings);
                 var from = GetSetting("SMTP_FROM", fileSettings) ?? user;
 
                 if (string.IsNullOrWhiteSpace(host) ||
@@ -690,7 +692,7 @@ namespace EmailMcp
         private static IReadOnlyDictionary<string, string> LoadSettingsFile()
         {
             var path = Environment.GetEnvironmentVariable("IMAP_SETTINGS_FILE")
-                       ?? Environment.GetEnvironmentVariable("EMAIL_SETTINGS_FILE");
+                ?? Environment.GetEnvironmentVariable("EMAIL_SETTINGS_FILE");
             if (string.IsNullOrWhiteSpace(path))
                 return new Dictionary<string, string>(StringComparer.Ordinal);
 

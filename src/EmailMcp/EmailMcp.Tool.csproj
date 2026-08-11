@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>email-mcp</ToolCommandName>
+    <PackageId>EmailMcp.Tool</PackageId>
+    <Packageversion>0.1.0</packageVersion>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</packageReadmeFile>
+    <PackageTags>mcp;model-context-protocol;imap;email;dotnet-tool</packageTags>
+    <Description>A stdia Model Context Protocol server for reading IMAP email and opening local email drafts.</Description>
+    <PackageRequirelicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <GeneratePackageonBuild>false</GeneratepackageonBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MailKitSimplified.Receiver" Version="2.14.0" />
+    <PackageReference Include="MailKitSimplified.Sender" Version="2.14.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
+    <PackageReference Include="ModelContextProtocol" Version="2.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" Link="README.md" />
+  </ItemGroup>
+
+</Project>

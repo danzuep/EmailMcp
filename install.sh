@@ -20,16 +20,14 @@ if [[ -f "${ENV_FILE}" ]]; then
 else
   cat > "${ENV_FILE}" << 'EOF'
 # Required for reading mail
-IMAP_HOST=imap.example.com
-IMAP_PORT=993
+IMAP_HOST=imap.example.com:993
 IMAP_USER=you@example.com
 IMAP_PASSWORD=your-app-password
 # Or use OAuth2 instead of password:
 # IMAP_ACCESS_TOKEN=ya29...
 
 # Optional SMTP (for send_email)
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
+SMTP_HOST=smtp.example.com:587
 SMTP_USER=you@example.com
 SMTP_PASSWORD=your-app-password
 SMTP_FROM=you@example.com

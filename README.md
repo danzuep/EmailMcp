@@ -34,15 +34,14 @@ Built with **.NET**, **MailKitSimplified**, and the official **Model Context Pro
 
 Copy `EmailMcp.cs` to a folder of your choice, for example:
 
-```text
-~/tools/EmailMcp.cs
+```sh
+cd ~/tools/
 ```
 
 ### 2. Set credentials
 
 ```bash
-export IMAP_HOST=imap.example.com
-export IMAP_PORT=993
+export IMAP_HOST=imap.example.com:993
 export IMAP_USER=you@example.com
 export IMAP_PASSWORD='your-app-password'
 ```
@@ -50,14 +49,13 @@ export IMAP_PASSWORD='your-app-password'
 Or put the same keys in a file and point to it:
 
 ```bash
-export IMAP_SETTINGS_FILE=~/.config/email-mcp.env
+export EMAIL_SETTINGS_FILE=~/.config/email-mcp.env
 ```
 
 Example file contents:
 
 ```ini
-IMAP_HOST=imap.example.com
-IMAP_PORT=993
+IMAP_HOST=imap.example.com:993
 IMAP_USER=you@example.com
 IMAP_PASSWORD=your-app-password
 ```
@@ -65,7 +63,7 @@ IMAP_PASSWORD=your-app-password
 ### 3. Run it
 
 ```bash
-dotnet run --file ~/tools/EmailMcp.cs
+dotnet run --file ./EmailMcp.cs
 ```
 
 The process speaks MCP over stdio and waits for a client to connect. Logs go to stderr so they never corrupt the protocol stream.
@@ -84,8 +82,7 @@ Create or edit `.vscode/mcp.json` in your workspace:
       "command": "dotnet",
       "args": ["run", "--file", "/absolute/path/to/EmailMcp.cs"],
       "env": {
-        "IMAP_HOST": "imap.example.com",
-        "IMAP_PORT": "993",
+        "IMAP_HOST": "imap.example.com:993",
         "IMAP_USER": "you@example.com",
         "IMAP_PASSWORD": "${input:imap-password}"
       }
@@ -145,8 +142,7 @@ or on failure:
 Sending is **off by default**. To turn it on:
 
 ```bash
-export SMTP_HOST=smtp.example.com
-export SMTP_PORT=587
+export SMTP_HOST=smtp.example.com:587
 export SMTP_USER=you@example.com
 export SMTP_PASSWORD='your-app-password'
 export SMTP_FROM=you@example.com          # optional, defaults to SMTP_USER
@@ -165,14 +161,12 @@ export SEND_ALLOW_LIST='alice@example.com,*@yourcompany.com'
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `IMAP_HOST` | yes | — | IMAP server hostname |
-| `IMAP_PORT` | no | `993` | IMAP port |
+| `EMAIL_SETTINGS_FILE` | no | — | Path to a key=value settings file |
+| `IMAP_HOST` | yes | — | IMAP server hostname and optional port |
 | `IMAP_USER` | yes | — | Login username |
 | `IMAP_PASSWORD` | yes\* | — | Password or app password |
 | `IMAP_ACCESS_TOKEN` | yes\* | — | OAuth2 access token (XOAUTH2) |
-| `IMAP_SETTINGS_FILE` | no | — | Path to a key=value settings file |
-| `SMTP_HOST` | for send | — | SMTP server hostname |
-| `SMTP_PORT` | no | `587` | SMTP port |
+| `SMTP_HOST` | for send | — | SMTP server hostname and optional port |
 | `SMTP_USER` | for send | — | SMTP username |
 | `SMTP_PASSWORD` | for send | — | SMTP password |
 | `SMTP_FROM` | no | `SMTP_USER` | From address |

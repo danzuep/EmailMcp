@@ -2,7 +2,9 @@
   "servers": {
     "email": {
       "type": "stdio",
-      "command": "../run-email-mcp"
+      "command": "bash",
+      "args": ["./run-email-mcp"],
+      "cwd": "${workspaceFolder}"
     }
   }
 }

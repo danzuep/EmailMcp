@@ -172,7 +172,6 @@ namespace EmailMcp
                     imap = new
                     {
                         host = imapOpts.ImapHost,
-                        port = imapOpts.ImapPort,
                         user = imapOpts.ImapCredential?.UserName,
                         ok = imapError is null,
                         error = imapError
@@ -180,7 +179,6 @@ namespace EmailMcp
                     smtp = smtpOpts is null ? null : new
                     {
                         host = smtpOpts.SmtpHost,
-                        port = smtpOpts.SmtpPort,
                         user = smtpOpts.SmtpCredential?.UserName,
                         configured = true
                     },
@@ -271,7 +269,6 @@ namespace EmailMcp
         {
             var s = LoadSettings();
             var host = Req(s, "IMAP_HOST");
-            var port = ParsePort(Get(s, "IMAP_PORT"), 993);
             var user = Req(s, "IMAP_USER");
             var pass = Get(s, "IMAP_PASSWORD");
             var token = Get(s, "IMAP_ACCESS_TOKEN");
@@ -279,7 +276,7 @@ namespace EmailMcp
             if (string.IsNullOrWhiteSpace(pass) && string.IsNullOrWhiteSpace(token))
                 throw new InvalidOperationException("Set IMAP_PASSWORD or IMAP_ACCESS_TOKEN.");
 
-            var opts = new EmailReceiverOptions($"{host}:{port}")
+            var opts = new EmailReceiverOptions(host)
             {
                 MailFolderName = folder ?? "INBOX",
                 MailFolderAccess = FolderAccess.ReadOnly
@@ -308,10 +305,9 @@ namespace EmailMcp
                 ?? throw new InvalidOperationException("SMTP_USER (or IMAP_USER) required.");
             var pass = Get(s, "SMTP_PASSWORD") ?? Get(s, "IMAP_PASSWORD")
                 ?? throw new InvalidOperationException("SMTP_PASSWORD (or IMAP_PASSWORD) required.");
-            var port = ParsePort(Get(s, "SMTP_PORT"), 587);
             var from = Get(s, "SMTP_FROM") ?? user;
 
-            return new EmailSenderOptions($"{host}:{port}")
+            return new EmailSenderOptions(host)
             {
                 SmtpCredential = new NetworkCredential(user, pass),
                 EmailWriter = new EmailWriterOptions { DefaultReplyToAddress = from }
@@ -419,15 +415,14 @@ namespace EmailMcp
 
         private static IReadOnlyDictionary<string, string> LoadSettings()
         {
-            var path = Environment.GetEnvironmentVariable("IMAP_SETTINGS_FILE")
-                    ?? Environment.GetEnvironmentVariable("EMAIL_SETTINGS_FILE");
+            var path = Environment.GetEnvironmentVariable("EMAIL_SETTINGS_FILE");
             var dict = new Dictionary<string, string>(StringComparer.Ordinal);
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return dict;
 
             var allowed = new HashSet<string>(StringComparer.Ordinal)
             {
-                "IMAP_HOST","IMAP_PORT","IMAP_USER","IMAP_PASSWORD","IMAP_ACCESS_TOKEN",
-                "SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASSWORD","SMTP_FROM",
+                "IMAP_HOST","IMAP_USER","IMAP_PASSWORD","IMAP_ACCESS_TOKEN",
+                "SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM",
                 "SEND_EMAIL_ENABLED","SEND_ALLOW_LIST"
             };
 
@@ -448,10 +443,6 @@ namespace EmailMcp
 
         private static string Req(IReadOnlyDictionary<string, string> s, string key) =>
             Get(s, key) ?? throw new InvalidOperationException($"{key} is required.");
-
-        private static ushort ParsePort(string? text, ushort fallback) =>
-            string.IsNullOrWhiteSpace(text) ? fallback
-            : ushort.TryParse(text, out var p) && p is >= 1 and <= 65535 ? p : fallback;
 
         // ── JSON ─────────────────────────────────────────────────────────────
 

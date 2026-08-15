@@ -1,10 +1,3 @@
-#!/usr/bin/env dotnet
-#:property TargetFramework=net10.0
-#:package Microsoft.Extensions.Hosting@10.0.0
-#:package ModelContextProtocol@2.0.0
-#:package MailKitSimplified.Receiver@2.14.0
-#:package MailKitSimplified.Sender@2.14.0
-
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;

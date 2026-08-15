@@ -1,5 +1,3 @@
 <Solution>
-  <Folder Name="/EmailMcp/">
-    <Project Path="EmailMcp/EmailMcp.Tool.csproj" />
-  </Folder>
+  <Project Path="EmailMcp.csproj" />
 </Solution>

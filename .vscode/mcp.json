@@ -1,9 +1,14 @@
 {
+  "inputs": [],
   "servers": {
     "email": {
       "type": "stdio",
-      "command": "bash",
-      "args": ["./run-email-mcp"],
+      "command": "dotnet",
+      "args": [
+          "run",
+          "--project",
+          "EmailMcp.csproj"
+      ],
       "cwd": "${workspaceFolder}"
     }
   }

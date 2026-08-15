@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
@@ -12,30 +13,33 @@ using MailKitSimplified.Receiver.Models;
 using MailKitSimplified.Receiver.Services;
 using MailKitSimplified.Sender.Models;
 using MailKitSimplified.Sender.Services;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using ModelContextProtocol.Server;
 using MimeKit;
-
-var builder = Host.CreateApplicationBuilder(args);
-
-// Keep stdout clean for MCP stdio transport.
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
-
-builder.Services
-    .AddMcpServer()
-    .WithStdioServerTransport()
-    .WithToolsFromAssembly();
-
-await builder.Build().RunAsync();
+using ModelContextProtocol.Server;
 
 namespace EmailMcp
 {
     [McpServerToolType]
     public static partial class EmailTools
     {
+        // EmailService and typed logger set by Program during startup
+        public static EmailService? EmailService { get; set; }
+        public static ILogger? Logger { get; set; }
+        private static class Metrics
+        {
+            private static readonly ConcurrentDictionary<string, long> Counts = new();
+            private static readonly ConcurrentDictionary<string, long> TotalMs = new();
+            public static void Record(string name, TimeSpan elapsed)
+            {
+                Counts.AddOrUpdate(name, 1, (_, v) => v + 1);
+                TotalMs.AddOrUpdate(name, (long)elapsed.TotalMilliseconds, (_, v) => v + (long)elapsed.TotalMilliseconds);
+                if (Counts.TryGetValue(name, out var c) && TotalMs.TryGetValue(name, out var t))
+                    Logger?.LogDebug("Metric {Name}: count={Count} totalMs={TotalMs}", name, c, t);
+            }
+        }
+
+        // Helper no longer needed; EmailService handles DI resolution
+
         // ── read_email ───────────────────────────────────────────────────────
 
         [McpServerTool(Name = "read_email", ReadOnly = true)]
@@ -52,6 +56,7 @@ namespace EmailMcp
             uint? uniqueId = null,
             CancellationToken ct = default)
         {
+            var sw = Stopwatch.StartNew();
             try
             {
                 maxResults = Clamp(maxResults);
@@ -85,6 +90,7 @@ namespace EmailMcp
                 return Ok(messages.Select(m => ToEmail(m, uniqueId.Value)));
             }
             catch (Exception ex) { return Fail(ex); }
+            finally { Metrics.Record("read_email", sw.Elapsed); }
         }
 
         // ── search_emails ────────────────────────────────────────────────────
@@ -100,6 +106,7 @@ namespace EmailMcp
             [Description("IMAP folder. Default: INBOX.")] string folder = "INBOX",
             CancellationToken ct = default)
         {
+            var sw = Stopwatch.StartNew();
             try
             {
                 maxResults = Clamp(maxResults);
@@ -124,6 +131,7 @@ namespace EmailMcp
                 return Ok(results);
             }
             catch (Exception ex) { return Fail(ex); }
+            finally { Metrics.Record("search_emails", sw.Elapsed); }
         }
 
         // ── list_folders ─────────────────────────────────────────────────────
@@ -132,6 +140,7 @@ namespace EmailMcp
         [Description("List IMAP folders/mailboxes on the server.")]
         public static async Task<string> ListFoldersAsync(CancellationToken ct = default)
         {
+            var sw = Stopwatch.StartNew();
             try
             {
                 using var receiver = CreateReceiver();
@@ -139,6 +148,7 @@ namespace EmailMcp
                 return Ok(new { folders = names });
             }
             catch (Exception ex) { return Fail(ex); }
+            finally { Metrics.Record("list_folders", sw.Elapsed); }
         }
 
         // ── get_status ───────────────────────────────────────────────────────
@@ -147,56 +157,49 @@ namespace EmailMcp
         [Description("Check IMAP (and optional SMTP) connectivity without downloading messages.")]
         public static async Task<string> GetStatusAsync(CancellationToken ct = default)
         {
+            var sw = Stopwatch.StartNew();
             try
             {
-                var imapOpts = LoadReceiverOptions();
-                var smtpOpts = TryLoadSenderOptions();
-
                 string? imapError = null;
                 try
                 {
-                    using var receiver = ImapReceiver.Create(imapOpts);
+                    using var receiver = CreateReceiver();
                     _ = await receiver.ReadMail.Top(1).GetMessageSummariesAsync(ct);
                 }
-                catch (Exception ex) { imapError = Friendly(ex); }
+                catch (Exception ex)
+                {
+                    imapError = Friendly(ex);
+                }
 
                 string? smtpError = null;
-                bool smtpConfigured = smtpOpts is not null;
-                if (smtpConfigured)
+                try
                 {
-                    try
-                    {
-                        using var sender = SmtpSender.Create(smtpOpts);
-                        // The act of creating and disposing the sender will connect and disconnect.
-                    }
-                    catch (Exception ex)
-                    {
-                        smtpError = Friendly(ex);
-                    }
+                    using var sender = CreateSender();
+                    // The act of creating and disposing the sender will connect and disconnect.
+                }
+                catch (Exception ex)
+                {
+                    smtpError = Friendly(ex);
                 }
 
                 return Ok(new
                 {
                     imap = new
                     {
-                        host = imapOpts.ImapHost,
-                        user = imapOpts.ImapCredential?.UserName,
                         ok = imapError is null,
                         error = imapError
                     },
-                    smtp = smtpConfigured ? new
+                    smtp = new
                     {
-                        host = smtpOpts?.SmtpHost,
-                        user = smtpOpts?.SmtpCredential?.UserName,
-                        configured = true,
                         ok = smtpError is null,
                         error = smtpError
-                    } : null,
+                    },
                     sendAllowList = GetAllowList(),
                     sendEnabled = IsSendEnabled()
                 });
             }
             catch (Exception ex) { return Fail(ex); }
+            finally { Metrics.Record("get_status", sw.Elapsed); }
         }
 
         // ── send_email ───────────────────────────────────────────────────────
@@ -214,6 +217,7 @@ namespace EmailMcp
             [Description("Optional BCC, comma-separated.")] string? bcc = null,
             CancellationToken ct = default)
         {
+            var sw = Stopwatch.StartNew();
             try
             {
                 if (!IsSendEnabled())
@@ -229,11 +233,11 @@ namespace EmailMcp
                 if (blocked.Count > 0)
                     return Fail($"Not on SEND_ALLOW_LIST: {string.Join(", ", blocked)}. Use exact addresses or *@example.com.");
 
-                var opts = LoadSenderOptions();
-                using var sender = SmtpSender.Create(opts);
+                var opts = EmailService?.GetSenderOptions();
+                using var sender = CreateSender();
 
                 var writer = sender.WriteEmail
-                    .From(opts.EmailWriter?.DefaultReplyToAddress ?? opts.SmtpCredential?.UserName ?? "")
+                    .From(opts?.EmailWriter?.DefaultReplyToAddress ?? opts?.SmtpCredential?.UserName ?? "")
                     .To(to).Cc(cc).Bcc(bcc)
                     .Subject(subject);
 
@@ -243,6 +247,7 @@ namespace EmailMcp
                 return Ok(new { sent = true, to, subject, message = "Email sent successfully." });
             }
             catch (Exception ex) { return Fail(ex); }
+            finally { Metrics.Record("send_email", sw.Elapsed); }
         }
 
         // ── draft_email ──────────────────────────────────────────────────────
@@ -254,6 +259,7 @@ namespace EmailMcp
             [Description("Subject.")] string subject,
             [Description("Body (plain text).")] string body)
         {
+            var sw = Stopwatch.StartNew();
             try
             {
                 ArgumentException.ThrowIfNullOrWhiteSpace(to);
@@ -265,64 +271,26 @@ namespace EmailMcp
                 return Ok(new { opened = true, message = "Draft opened in default email app (not sent)." });
             }
             catch (Exception ex) { return Fail(ex); }
+            finally { Metrics.Record("draft_email", sw.Elapsed); }
         }
 
         // ── native options helpers ───────────────────────────────────────────
 
         private static ImapReceiver CreateReceiver(string? folder = null)
         {
-            var opts = LoadReceiverOptions(folder);
-            return ImapReceiver.Create(opts);
+            var imapReceiver = EmailService?.CreateReceiver(folder);
+            ArgumentNullException.ThrowIfNull(imapReceiver);
+            return imapReceiver;
         }
 
-        private static EmailReceiverOptions LoadReceiverOptions(string? folder = null)
+        private static SmtpSender CreateSender()
         {
-            var s = LoadSettings();
-            var host = Req(s, "IMAP_HOST");
-            var user = Req(s, "IMAP_USER");
-            var pass = Get(s, "IMAP_PASSWORD");
-            var token = Get(s, "IMAP_ACCESS_TOKEN");
-
-            if (string.IsNullOrWhiteSpace(pass) && string.IsNullOrWhiteSpace(token))
-                throw new InvalidOperationException("Set IMAP_PASSWORD or IMAP_ACCESS_TOKEN.");
-
-            var opts = new EmailReceiverOptions(host)
-            {
-                MailFolderName = folder ?? "INBOX",
-                MailFolderAccess = FolderAccess.ReadOnly
-            };
-
-            if (!string.IsNullOrWhiteSpace(token))
-                opts.AuthenticationMechanism = new SaslMechanismOAuth2(user, token);
-            else
-                opts.ImapCredential = new NetworkCredential(user, pass);
-
-            return opts;
+            var smtpSender = EmailService?.CreateSender();
+            ArgumentNullException.ThrowIfNull(smtpSender);
+            return smtpSender;
         }
 
-        private static EmailSenderOptions? TryLoadSenderOptions()
-        {
-            try { return LoadSenderOptions(); }
-            catch { return null; }
-        }
-
-        private static EmailSenderOptions LoadSenderOptions()
-        {
-            var s = LoadSettings();
-            var host = Get(s, "SMTP_HOST") ?? Get(s, "IMAP_HOST")
-                ?? throw new InvalidOperationException("SMTP_HOST (or IMAP_HOST) required.");
-            var user = Get(s, "SMTP_USER") ?? Get(s, "IMAP_USER")
-                ?? throw new InvalidOperationException("SMTP_USER (or IMAP_USER) required.");
-            var pass = Get(s, "SMTP_PASSWORD") ?? Get(s, "IMAP_PASSWORD")
-                ?? throw new InvalidOperationException("SMTP_PASSWORD (or IMAP_PASSWORD) required.");
-            var from = Get(s, "SMTP_FROM") ?? user;
-
-            return new EmailSenderOptions(host)
-            {
-                SmtpCredential = new NetworkCredential(user, pass),
-                EmailWriter = new EmailWriterOptions { DefaultReplyToAddress = from }
-            };
-        }
+        // EmailService provides receiver/sender options and factories; no local settings fallback.
 
         // ── search / validation ──────────────────────────────────────────────
 
@@ -423,36 +391,7 @@ namespace EmailMcp
 
         // ── settings ─────────────────────────────────────────────────────────
 
-        private static IReadOnlyDictionary<string, string> LoadSettings()
-        {
-            var path = Environment.GetEnvironmentVariable("EMAIL_SETTINGS_FILE");
-            var dict = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return dict;
-
-            var allowed = new HashSet<string>(StringComparer.Ordinal)
-            {
-                "IMAP_HOST","IMAP_USER","IMAP_PASSWORD","IMAP_ACCESS_TOKEN",
-                "SMTP_HOST","SMTP_USER","SMTP_PASSWORD","SMTP_FROM",
-                "SEND_EMAIL_ENABLED","SEND_ALLOW_LIST"
-            };
-
-            foreach (var line in File.ReadLines(path))
-            {
-                var t = line.Trim();
-                if (string.IsNullOrWhiteSpace(t) || t.StartsWith('#')) continue;
-                var i = t.IndexOf('=');
-                if (i <= 0) continue;
-                var k = t[..i].Trim();
-                if (allowed.Contains(k)) dict[k] = t[(i + 1)..].Trim();
-            }
-            return dict;
-        }
-
-        private static string? Get(IReadOnlyDictionary<string, string> s, string key) =>
-            Environment.GetEnvironmentVariable(key) ?? s.GetValueOrDefault(key);
-
-        private static string Req(IReadOnlyDictionary<string, string> s, string key) =>
-            Get(s, key) ?? throw new InvalidOperationException($"{key} is required.");
+        // LoadSettings removed - configuration is provided via DI (IOptions<EmailReceiverOptions>/EmailSenderOptions)
 
         // ── JSON ─────────────────────────────────────────────────────────────
 

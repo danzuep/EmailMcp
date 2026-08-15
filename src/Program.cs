@@ -1,11 +1,12 @@
+using EmailMcp;
 using MailKitSimplified.Receiver;
 using MailKitSimplified.Sender;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
-using EmailMcp;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -20,6 +21,9 @@ Log.Logger = new LoggerConfiguration()
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Error);
 builder.Logging.AddSerilog(Log.Logger, dispose: true);
+
+var appsettingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+builder.Configuration.AddJsonFile(appsettingsPath);
 
 builder.Services
     .AddMcpServer()

@@ -160,6 +160,21 @@ namespace EmailMcp
                 }
                 catch (Exception ex) { imapError = Friendly(ex); }
 
+                string? smtpError = null;
+                bool smtpConfigured = smtpOpts is not null;
+                if (smtpConfigured)
+                {
+                    try
+                    {
+                        using var sender = SmtpSender.Create(smtpOpts);
+                        // The act of creating and disposing the sender will connect and disconnect.
+                    }
+                    catch (Exception ex)
+                    {
+                        smtpError = Friendly(ex);
+                    }
+                }
+
                 return Ok(new
                 {
                     imap = new
@@ -169,12 +184,14 @@ namespace EmailMcp
                         ok = imapError is null,
                         error = imapError
                     },
-                    smtp = smtpOpts is null ? null : new
+                    smtp = smtpConfigured ? new
                     {
                         host = smtpOpts.SmtpHost,
                         user = smtpOpts.SmtpCredential?.UserName,
-                        configured = true
-                    },
+                        configured = true,
+                        ok = smtpError is null,
+                        error = smtpError
+                    } : null,
                     sendAllowList = GetAllowList(),
                     sendEnabled = IsSendEnabled()
                 });

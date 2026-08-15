@@ -23,15 +23,9 @@ namespace EmailMcp
 
         public ImapReceiver CreateReceiver(string? folder = null)
         {
-            var opts = new EmailReceiverOptions(_receiverOptions.ImapHost)
-            {
-                MailFolderName = folder ?? _receiverOptions.MailFolderName ?? "INBOX",
-                MailFolderAccess = _receiverOptions.MailFolderAccess
-            };
-            if (_receiverOptions.AuthenticationMechanism is not null)
-                opts.AuthenticationMechanism = _receiverOptions.AuthenticationMechanism;
-            if (_receiverOptions.ImapCredential is not null)
-                opts.ImapCredential = _receiverOptions.ImapCredential;
+            var opts = _receiverOptions.Copy();
+            if (!string.IsNullOrWhiteSpace(folder))
+                opts.MailFolderName = folder;
             var imapReceiver = ImapReceiver.Create(opts);
             return imapReceiver;
         }

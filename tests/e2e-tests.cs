@@ -9,7 +9,7 @@ var useCompose = args.Contains("--compose", StringComparer.OrdinalIgnoreCase);
 var smtpPort = useCompose ? 2525 : 25;
 var imapPort = useCompose ? 2143 : 143;
 var directory = Directory.GetCurrentDirectory();
-var composeFile = Path.Combine(directory, "docker-compose.e2e.yml");
+var composeFile = Path.Combine(directory, "tests", "docker-compose.e2e.yml");
 
 if (useCompose)
 {

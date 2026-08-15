@@ -6,68 +6,25 @@ Built with **.NET**, **MailKitSimplified**, and the official **Model Context Pro
 
 ---
 
-## Features
-
-- [x] Read newest messages or a single message by UniqueId
-- [x] Search by subject, from, body, unread, or read
-- [x] List IMAP folders
-- [x] Connection status check
-- [x] Open a pre-filled draft in your default mail app (never sends)
-- [x] Optional SMTP send, off by default and gated by an allow-list
-- [x] OAuth2 (XOAUTH2) or username/password authentication
-- [x] Friendly JSON errors instead of stack traces
-- [x] Single-file runnable script — no project scaffolding required
-
----
-
-## Requirements
-
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) (or newer)
-- An email account with IMAP access (and SMTP if you enable sending)
-- For Gmail / Microsoft 365: an [app password](https://support.google.com/accounts/answer/185833) or OAuth2 access token
-
----
-
 ## Quick start
 
-### Run it
+### Run tests
 
-```bash
-dotnet run --file ./tests/EmailMcp.cs
+```sh
+dotnet run --file ./tests/e2e-tests.cs -- --compose
+```
+
+### Build and run server
+
+```sh
+dotnet build ./src/EmailMcp.csproj
+docker compose -f tests/docker-compose.e2e.yml up -d
+timeout 30s dotnet run --project ./src/EmailMcp.csproj
 ```
 
 ---
 
 ## Connect to VS Code / GitHub Copilot
-
-Create or edit `.vscode/mcp.json` in your workspace:
-
-```json
-{
-  "servers": {
-    "email": {
-      "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--file", "/absolute/path/to/EmailMcp.cs"],
-      "env": {
-        "IMAP_HOST": "imap.example.com:993",
-        "IMAP_USER": "you@example.com",
-        "IMAP_PASSWORD": "${input:imap-password}"
-      }
-    }
-  },
-  "inputs": [
-    {
-      "type": "promptString",
-      "id": "imap-password",
-      "description": "IMAP password or app password",
-      "password": true
-    }
-  ]
-}
-```
-
-Then:
 
 1. Open the Command Palette → **MCP: List Servers**
 2. Start the `email` server if it is not already running
@@ -104,70 +61,3 @@ or on failure:
 ```
 
 ---
-
-## Optional: enable sending
-
-Sending is **off by default**. To turn it on:
-
-```bash
-export SMTP_HOST=smtp.example.com:587
-export SMTP_USER=you@example.com
-export SMTP_PASSWORD='your-app-password'
-export SMTP_FROM=you@example.com          # optional, defaults to SMTP_USER
-
-export SEND_EMAIL_ENABLED=true
-export SEND_ALLOW_LIST='alice@example.com,*@yourcompany.com'
-```
-
-- `SEND_ALLOW_LIST` accepts exact addresses or domain patterns (`*@example.com`).
-- An empty allow-list blocks every recipient (safe default).
-- SMTP settings fall back to `IMAP_*` values when the corresponding `SMTP_*` variable is missing.
-
----
-
-## Configuration reference
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `EMAIL_SETTINGS_FILE` | no | — | Path to a key=value settings file |
-| `IMAP_HOST` | yes | — | IMAP server hostname and optional port |
-| `IMAP_USER` | yes | — | Login username |
-| `IMAP_PASSWORD` | yes\* | — | Password or app password |
-| `IMAP_ACCESS_TOKEN` | yes\* | — | OAuth2 access token (XOAUTH2) |
-| `SMTP_HOST` | for send | — | SMTP server hostname and optional port |
-| `SMTP_USER` | for send | — | SMTP username |
-| `SMTP_PASSWORD` | for send | — | SMTP password |
-| `SMTP_FROM` | no | `SMTP_USER` | From address |
-| `SEND_EMAIL_ENABLED` | no | `false` | Set to `true` to allow `send_email` |
-| `SEND_ALLOW_LIST` | no | _(empty)_ | Comma-separated allowed recipients |
-
-\* Provide either `IMAP_PASSWORD` or `IMAP_ACCESS_TOKEN`.
-
----
-
-## Security notes
-
-- Prefer **app passwords** or short-lived OAuth tokens over your main account password.
-- Keep `SEND_EMAIL_ENABLED` unset (or `false`) unless you need outbound mail.
-- Always set a tight `SEND_ALLOW_LIST` when sending is enabled.
-- Never commit passwords or tokens to source control; use environment variables or the VS Code `${input:…}` prompt.
-- The server runs locally over stdio — your mail credentials stay on your machine.
-
----
-
-## Example prompts
-
-Once the server is connected in Agent mode:
-
-- “What’s in my inbox?”
-- “Find unread mail about the quarterly report”
-- “Read uniqueId 128 and summarize it”
-- “List my mail folders”
-- “Draft an email to bob@example.com about rescheduling our meeting”
-- “Send a short confirmation to alice@example.com” *(only if send is enabled and Alice is on the allow-list)*
-
----
-
-## License
-
-Use and modify freely for your own projects.

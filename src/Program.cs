@@ -1,10 +1,17 @@
 using EmailMcp;
 using MailKitSimplified.Receiver;
+using MailKitSimplified.Receiver.Abstractions;
+using MailKitSimplified.Receiver.Models;
+using MailKitSimplified.Receiver.Services;
 using MailKitSimplified.Sender;
+using MailKitSimplified.Sender.Abstractions;
+using MailKitSimplified.Sender.Models;
+using MailKitSimplified.Sender.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Serilog;
 using Serilog.Events;
 
@@ -22,7 +29,8 @@ Log.Logger = new LoggerConfiguration()
 
 // Keep stdout clean for MCP stdio transport. Only errors go to stderr console.
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Error);
-builder.Logging.AddFilter("ModelContextProtocol", LogLevel.Warning);
+builder.Logging.AddFilter("ModelContextProtocol", LogLevel.Error);
+builder.Logging.AddFilter("ModelContextProtocol.Server.StdioServerTransport", LogLevel.Error);
 builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
 builder.Logging.AddSerilog(Log.Logger, dispose: true);
 
@@ -45,12 +53,15 @@ builder.Services
 // Register EmailService which resolves receiver/sender options and factories
 builder.Services.AddMailKitSimplifiedEmailSender(builder.Configuration);
 builder.Services.AddMailKitSimplifiedEmailReceiver(builder.Configuration);
+builder.Services.AddSingleton<ImapReceiver>(p => (ImapReceiver)p.GetRequiredService<IImapReceiver>());
+builder.Services.AddSingleton<SmtpSender>(p => (SmtpSender)p.GetRequiredService<ISmtpSender>());
 builder.Services.AddSingleton<EmailService>();
 
 var host = builder.Build();
 
 try
 {
+    // _ = host.Services.GetRequiredService<EmailService>();
     await host.RunAsync();
 }
 catch (Exception ex)

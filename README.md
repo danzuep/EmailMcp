@@ -63,7 +63,7 @@ IMAP_PASSWORD=your-app-password
 ### 3. Run it
 
 ```bash
-dotnet run --file ./EmailMcp.cs
+dotnet run --project ./src/EmailMcp.csproj
 ```
 
 The process speaks MCP over stdio and waits for a client to connect. Logs go to stderr so they never corrupt the protocol stream.

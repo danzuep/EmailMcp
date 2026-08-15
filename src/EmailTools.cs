@@ -8,7 +8,10 @@ using System.Text.RegularExpressions;
 using MailKit;
 using MailKit.Search;
 using MailKit.Security;
+using MailKitSimplified.Receiver.Abstractions;
 using MailKitSimplified.Receiver.Extensions;
+using MailKitSimplified.Receiver.Services;
+using MailKitSimplified.Sender.Abstractions;
 using MimeKit;
 using ModelContextProtocol.Server;
 using Serilog;
@@ -39,7 +42,7 @@ namespace EmailMcp
             "is supplied. Returns JSON with UniqueId, MessageId, headers, Markdown body, " +
             "and attachment metadata.")]
         public static async Task<string> ReadEmailAsync(
-            EmailService emailService,
+            ImapReceiver imapReceiver,
             [Description("Maximum number of messages (1-25). Ignored when uniqueId is set.")]
             int maxResults = 5,
             [Description("IMAP folder. Default: INBOX.")]
@@ -48,16 +51,15 @@ namespace EmailMcp
             uint? uniqueId = null,
             CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(emailService);
+            ArgumentNullException.ThrowIfNull(imapReceiver);
             var sw = Stopwatch.StartNew();
             try
             {
                 maxResults = Clamp(maxResults);
-                using var receiver = emailService.CreateReceiver(folder);
 
                 if (uniqueId is null)
                 {
-                    var summaries = await receiver.ReadMail
+                    var summaries = await imapReceiver.ReadMail
                         .Top(maxResults)
                         .ItemsForMimeMessages()
                         .GetMessageSummariesAsync(ct);
@@ -65,7 +67,7 @@ namespace EmailMcp
                     var results = new List<EmailResult>(summaries.Count);
                     foreach (var s in summaries)
                     {
-                        var msgs = await receiver.ReadFrom(folder)
+                        var msgs = await imapReceiver.ReadFrom(folder)
                             .Query(SearchQuery.Uids(new UniqueIdSet { s.UniqueId }))
                             .ItemsForMimeMessages()
                             .GetMimeMessagesAsync(ct);
@@ -75,7 +77,7 @@ namespace EmailMcp
                     return Ok(results);
                 }
 
-                var messages = await receiver.ReadFrom(folder)
+                var messages = await imapReceiver.ReadFrom(folder)
                     .Query(SearchQuery.Uids(new UniqueIdSet { new UniqueId(uniqueId.Value) }))
                     .ItemsForMimeMessages()
                     .GetMimeMessagesAsync(ct);
@@ -93,22 +95,21 @@ namespace EmailMcp
             "Search an IMAP folder. Returns UniqueId, Date, From, To, Subject. " +
             "searchField: all | subject | from | unread | read.")]
         public static async Task<string> SearchEmailsAsync(
-            EmailService emailService,
+            ImapReceiver imapReceiver,
             [Description("Search term (required for all/subject/from).")] string? searchTerm = null,
             [Description("Field: all, subject, from, unread, or read.")] string searchField = "all",
             [Description("Max results (1-25).")] int maxResults = 10,
             [Description("IMAP folder. Default: INBOX.")] string folder = "INBOX",
             CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(emailService);
+            ArgumentNullException.ThrowIfNull(imapReceiver);
             var sw = Stopwatch.StartNew();
             try
             {
                 maxResults = Clamp(maxResults);
                 var query = BuildQuery(searchTerm, searchField);
 
-                using var receiver = emailService.CreateReceiver(folder);
-                var summaries = await receiver.ReadFrom(folder)
+                var summaries = await imapReceiver.ReadFrom(folder)
                     .Query(query)
                     .ItemsForMimeMessages()
                     .GetMessageSummariesAsync(ct);
@@ -134,15 +135,14 @@ namespace EmailMcp
         [McpServerTool(Name = "list_folders", ReadOnly = true)]
         [Description("List IMAP folders/mailboxes on the server.")]
         public static async Task<string> ListFoldersAsync(
-            EmailService emailService,
+            IImapReceiver imapReceiver,
             CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(emailService);
+            ArgumentNullException.ThrowIfNull(imapReceiver);
             var sw = Stopwatch.StartNew();
             try
             {
-                using var receiver = emailService.CreateReceiver();
-                var names = await receiver.GetMailFolderNamesAsync(ct);
+                var names = await imapReceiver.GetMailFolderNamesAsync(ct);
                 return Ok(new { folders = names });
             }
             catch (Exception ex) { return Fail(ex); }
@@ -152,35 +152,23 @@ namespace EmailMcp
         // ── get_status ───────────────────────────────────────────────────────
 
         [McpServerTool(Name = "get_status", ReadOnly = true)]
-        [Description("Check IMAP (and optional SMTP) connectivity without downloading messages.")]
+        [Description("Check IMAP connectivity without downloading messages.")]
         public static async Task<string> GetStatusAsync(
-            EmailService emailService,
+            IMailFolderClient mailFolderClient,
             CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(emailService);
+            ArgumentNullException.ThrowIfNull(mailFolderClient);
             var sw = Stopwatch.StartNew();
             try
             {
                 string? imapError = null;
                 try
                 {
-                    using var receiver = emailService.CreateReceiver();
-                    _ = await receiver.MailFolderClient.ConnectAsync(false, ct);
+                    _ = await mailFolderClient.ConnectAsync(false, ct);
                 }
                 catch (Exception ex)
                 {
                     imapError = Friendly(ex);
-                }
-
-                string? smtpError = null;
-                try
-                {
-                    using var sender = emailService.CreateSender();
-                    // The act of creating and disposing the sender will connect and disconnect.
-                }
-                catch (Exception ex)
-                {
-                    smtpError = Friendly(ex);
                 }
 
                 return Ok(new
@@ -189,11 +177,6 @@ namespace EmailMcp
                     {
                         ok = imapError is null,
                         error = imapError
-                    },
-                    smtp = new
-                    {
-                        ok = smtpError is null,
-                        error = smtpError
                     },
                     sendAllowList = GetAllowList(),
                     sendEnabled = IsSendEnabled()
@@ -210,7 +193,7 @@ namespace EmailMcp
             "Send via SMTP. Requires SMTP_* env vars and SEND_EMAIL_ENABLED=true. " +
             "Recipients must match SEND_ALLOW_LIST (addresses or *@domain.com).")]
         public static async Task<string> SendEmailAsync(
-            EmailService emailService,
+            ISmtpSender smtpSender,
             [Description("Recipient (required).")] string to,
             [Description("Subject (required).")] string subject,
             [Description("Body (plain or HTML).")] string body,
@@ -219,7 +202,7 @@ namespace EmailMcp
             [Description("Optional BCC, comma-separated.")] string? bcc = null,
             CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(emailService);
+            ArgumentNullException.ThrowIfNull(smtpSender);
             var sw = Stopwatch.StartNew();
             try
             {
@@ -236,9 +219,7 @@ namespace EmailMcp
                 if (blocked.Count > 0)
                     return Fail($"Not on SEND_ALLOW_LIST: {string.Join(", ", blocked)}. Use exact addresses or *@example.com.");
 
-                using var sender = emailService.CreateSender();
-
-                var writer = sender.WriteEmail
+                var writer = smtpSender.WriteEmail
                     .To(to).Cc(cc).Bcc(bcc)
                     .Subject(subject);
 

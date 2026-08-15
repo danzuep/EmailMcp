@@ -186,8 +186,8 @@ namespace EmailMcp
                     },
                     smtp = smtpConfigured ? new
                     {
-                        host = smtpOpts.SmtpHost,
-                        user = smtpOpts.SmtpCredential?.UserName,
+                        host = smtpOpts?.SmtpHost,
+                        user = smtpOpts?.SmtpCredential?.UserName,
                         configured = true,
                         ok = smtpError is null,
                         error = smtpError

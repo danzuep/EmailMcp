@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>email-mcp</ToolCommandName>
-    <PackageId>EmailMcp.Tool</PackageId>
+    <PackageId>EmailMcp</PackageId>
     <PackageVersion>0.1.0</PackageVersion>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -16,6 +16,13 @@
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <WarningsAsErrors>true</WarningsAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <EnableSdkContainerSupport>true</EnableSdkContainerSupport>
+    <ContainerRepository>danzuep/EmailMcp</ContainerRepository>
+    <ContainerFamily>alpine</ContainerFamily>
+    <RuntimeIdentifiers>linux-x64;linux-arm64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,6 +36,7 @@
 
   <ItemGroup>
     <None Include="../README.md" Pack="true" PackagePath="/" Link="README.md" />
+    <None Include="../logs/*" LinkBase="logs" />
   </ItemGroup>
 
   <ItemGroup>

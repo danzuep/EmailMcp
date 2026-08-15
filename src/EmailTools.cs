@@ -9,22 +9,15 @@ using MailKit;
 using MailKit.Search;
 using MailKit.Security;
 using MailKitSimplified.Receiver.Extensions;
-using MailKitSimplified.Receiver.Models;
-using MailKitSimplified.Receiver.Services;
-using MailKitSimplified.Sender.Models;
-using MailKitSimplified.Sender.Services;
-using Microsoft.Extensions.Logging;
 using MimeKit;
 using ModelContextProtocol.Server;
+using Serilog;
 
 namespace EmailMcp
 {
     [McpServerToolType]
     public static partial class EmailTools
     {
-        // EmailService and typed logger set by Program during startup
-        public static EmailService? EmailService { get; set; }
-        public static ILogger? Logger { get; set; }
         private static class Metrics
         {
             private static readonly ConcurrentDictionary<string, long> Counts = new();
@@ -34,11 +27,9 @@ namespace EmailMcp
                 Counts.AddOrUpdate(name, 1, (_, v) => v + 1);
                 TotalMs.AddOrUpdate(name, (long)elapsed.TotalMilliseconds, (_, v) => v + (long)elapsed.TotalMilliseconds);
                 if (Counts.TryGetValue(name, out var c) && TotalMs.TryGetValue(name, out var t))
-                    Logger?.LogDebug("Metric {Name}: count={Count} totalMs={TotalMs}", name, c, t);
+                    Log.Debug("Metric {Name}: count={Count} totalMs={TotalMs}", name, c, t);
             }
         }
-
-        // Helper no longer needed; EmailService handles DI resolution
 
         // ── read_email ───────────────────────────────────────────────────────
 
@@ -48,6 +39,7 @@ namespace EmailMcp
             "is supplied. Returns JSON with UniqueId, MessageId, headers, Markdown body, " +
             "and attachment metadata.")]
         public static async Task<string> ReadEmailAsync(
+            EmailService emailService,
             [Description("Maximum number of messages (1-25). Ignored when uniqueId is set.")]
             int maxResults = 5,
             [Description("IMAP folder. Default: INBOX.")]
@@ -56,11 +48,12 @@ namespace EmailMcp
             uint? uniqueId = null,
             CancellationToken ct = default)
         {
+            ArgumentNullException.ThrowIfNull(emailService);
             var sw = Stopwatch.StartNew();
             try
             {
                 maxResults = Clamp(maxResults);
-                using var receiver = CreateReceiver(folder);
+                using var receiver = emailService.CreateReceiver(folder);
 
                 if (uniqueId is null)
                 {
@@ -100,19 +93,21 @@ namespace EmailMcp
             "Search an IMAP folder. Returns UniqueId, Date, From, To, Subject. " +
             "searchField: all | subject | from | unread | read.")]
         public static async Task<string> SearchEmailsAsync(
+            EmailService emailService,
             [Description("Search term (required for all/subject/from).")] string? searchTerm = null,
             [Description("Field: all, subject, from, unread, or read.")] string searchField = "all",
             [Description("Max results (1-25).")] int maxResults = 10,
             [Description("IMAP folder. Default: INBOX.")] string folder = "INBOX",
             CancellationToken ct = default)
         {
+            ArgumentNullException.ThrowIfNull(emailService);
             var sw = Stopwatch.StartNew();
             try
             {
                 maxResults = Clamp(maxResults);
                 var query = BuildQuery(searchTerm, searchField);
 
-                using var receiver = CreateReceiver(folder);
+                using var receiver = emailService.CreateReceiver(folder);
                 var summaries = await receiver.ReadFrom(folder)
                     .Query(query)
                     .ItemsForMimeMessages()
@@ -138,12 +133,15 @@ namespace EmailMcp
 
         [McpServerTool(Name = "list_folders", ReadOnly = true)]
         [Description("List IMAP folders/mailboxes on the server.")]
-        public static async Task<string> ListFoldersAsync(CancellationToken ct = default)
+        public static async Task<string> ListFoldersAsync(
+            EmailService emailService,
+            CancellationToken ct = default)
         {
+            ArgumentNullException.ThrowIfNull(emailService);
             var sw = Stopwatch.StartNew();
             try
             {
-                using var receiver = CreateReceiver();
+                using var receiver = emailService.CreateReceiver();
                 var names = await receiver.GetMailFolderNamesAsync(ct);
                 return Ok(new { folders = names });
             }
@@ -155,16 +153,19 @@ namespace EmailMcp
 
         [McpServerTool(Name = "get_status", ReadOnly = true)]
         [Description("Check IMAP (and optional SMTP) connectivity without downloading messages.")]
-        public static async Task<string> GetStatusAsync(CancellationToken ct = default)
+        public static async Task<string> GetStatusAsync(
+            EmailService emailService,
+            CancellationToken ct = default)
         {
+            ArgumentNullException.ThrowIfNull(emailService);
             var sw = Stopwatch.StartNew();
             try
             {
                 string? imapError = null;
                 try
                 {
-                    using var receiver = CreateReceiver();
-                    _ = await receiver.ReadMail.Top(1).GetMessageSummariesAsync(ct);
+                    using var receiver = emailService.CreateReceiver();
+                    _ = await receiver.MailFolderClient.ConnectAsync(false, ct);
                 }
                 catch (Exception ex)
                 {
@@ -174,7 +175,7 @@ namespace EmailMcp
                 string? smtpError = null;
                 try
                 {
-                    using var sender = CreateSender();
+                    using var sender = emailService.CreateSender();
                     // The act of creating and disposing the sender will connect and disconnect.
                 }
                 catch (Exception ex)
@@ -209,6 +210,7 @@ namespace EmailMcp
             "Send via SMTP. Requires SMTP_* env vars and SEND_EMAIL_ENABLED=true. " +
             "Recipients must match SEND_ALLOW_LIST (addresses or *@domain.com).")]
         public static async Task<string> SendEmailAsync(
+            EmailService emailService,
             [Description("Recipient (required).")] string to,
             [Description("Subject (required).")] string subject,
             [Description("Body (plain or HTML).")] string body,
@@ -217,6 +219,7 @@ namespace EmailMcp
             [Description("Optional BCC, comma-separated.")] string? bcc = null,
             CancellationToken ct = default)
         {
+            ArgumentNullException.ThrowIfNull(emailService);
             var sw = Stopwatch.StartNew();
             try
             {
@@ -233,11 +236,9 @@ namespace EmailMcp
                 if (blocked.Count > 0)
                     return Fail($"Not on SEND_ALLOW_LIST: {string.Join(", ", blocked)}. Use exact addresses or *@example.com.");
 
-                var opts = EmailService?.GetSenderOptions();
-                using var sender = CreateSender();
+                using var sender = emailService.CreateSender();
 
                 var writer = sender.WriteEmail
-                    .From(opts?.EmailWriter?.DefaultReplyToAddress ?? opts?.SmtpCredential?.UserName ?? "")
                     .To(to).Cc(cc).Bcc(bcc)
                     .Subject(subject);
 
@@ -273,24 +274,6 @@ namespace EmailMcp
             catch (Exception ex) { return Fail(ex); }
             finally { Metrics.Record("draft_email", sw.Elapsed); }
         }
-
-        // ── native options helpers ───────────────────────────────────────────
-
-        private static ImapReceiver CreateReceiver(string? folder = null)
-        {
-            var imapReceiver = EmailService?.CreateReceiver(folder);
-            ArgumentNullException.ThrowIfNull(imapReceiver);
-            return imapReceiver;
-        }
-
-        private static SmtpSender CreateSender()
-        {
-            var smtpSender = EmailService?.CreateSender();
-            ArgumentNullException.ThrowIfNull(smtpSender);
-            return smtpSender;
-        }
-
-        // EmailService provides receiver/sender options and factories; no local settings fallback.
 
         // ── search / validation ──────────────────────────────────────────────
 

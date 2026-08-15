@@ -23,20 +23,6 @@ namespace EmailMcp
 
         public ImapReceiver CreateReceiver(string? folder = null)
         {
-            var opts = GetReceiverOptions(folder);
-            var imapReceiver = ImapReceiver.Create(opts);
-            return imapReceiver;
-        }
-
-        public SmtpSender CreateSender()
-        {
-            var opts = GetSenderOptions();
-            var smtpSender = SmtpSender.Create(opts);
-            return smtpSender;
-        }
-
-        public EmailReceiverOptions GetReceiverOptions(string? folder = null)
-        {
             var opts = new EmailReceiverOptions(_receiverOptions.ImapHost)
             {
                 MailFolderName = folder ?? _receiverOptions.MailFolderName ?? "INBOX",
@@ -46,13 +32,15 @@ namespace EmailMcp
                 opts.AuthenticationMechanism = _receiverOptions.AuthenticationMechanism;
             if (_receiverOptions.ImapCredential is not null)
                 opts.ImapCredential = _receiverOptions.ImapCredential;
-            return opts;
+            var imapReceiver = ImapReceiver.Create(opts);
+            return imapReceiver;
         }
 
-        public EmailSenderOptions GetSenderOptions()
+        public SmtpSender CreateSender()
         {
-            if (_senderOptions is null) throw new InvalidOperationException("EmailSenderOptions not configured.");
-            return _senderOptions;
+            var opts = _senderOptions;
+            var smtpSender = SmtpSender.Create(opts);
+            return smtpSender;
         }
     }
 }

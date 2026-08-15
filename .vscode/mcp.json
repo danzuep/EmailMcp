@@ -1,14 +1,46 @@
 {
-  "inputs": [],
+  // "inputs": [
+  //   {
+  //     "type": "promptString",
+  //     "id": "imap-username",
+  //     "description": "IMAP username",
+  //     "password": false
+  //   },
+  //   {
+  //     "type": "promptString",
+  //     "id": "imap-password",
+  //     "description": "IMAP password",
+  //     "password": true
+  //   }
+  // ],
   "servers": {
+    // "email-mcp": {
+    //   "command": "docker",
+    //   "args": [
+    //     "run",
+    //     "-i",
+    //     "--rm",
+    //     "danzuep/EmailMcp"
+    //   ],
+    //   "env": {
+    //     "EmailSender__SmtpHost": "localhost",
+    //     "EmailSender__SmtpPort": "25",
+    //     "EmailReceiver__ImapHost": "localhost",
+    //     "EmailReceiver__ImapPort": "143",
+    //     "EmailReceiver__MailFolderName": "INBOX",
+    //     "EmailReceiver__ImapCredential__UserName": "${input:imap-username}",
+    //     "EmailReceiver__ImapCredential__Password": "${input:imap-password}"
+    //   },
+    // },
     "email": {
       "type": "stdio",
       "command": "dotnet",
       "args": [
-          "run",
-          "--project",
-          "src/EmailMcp.csproj"
+        "run",
+        "--project",
+        "src/EmailMcp.csproj"
       ],
+      // "args": ["run", "--file", "tests/app.cs"],
       "cwd": "${workspaceFolder}"
     }
   }

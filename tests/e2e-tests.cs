@@ -1,37 +1,23 @@
+#:package Testcontainers@4.9.0
+#:property PublishTrimmed=false
+#:property JsonSerializerIsReflectionEnabledByDefault=true
+
 using System.Collections;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Mail;
 using System.Text;
 using System.Text.Json;
+using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Containers;
+using DotNet.Testcontainers.Networks;
 
-var useCompose = args.Contains("--compose", StringComparer.OrdinalIgnoreCase);
-var smtpPort = useCompose ? 2525 : 25;
-var imapPort = useCompose ? 2143 : 143;
-var directory = Directory.GetCurrentDirectory();
-var composeFile = Path.Combine(directory, "tests", "docker-compose.e2e.yml");
-
-if (useCompose)
-{
-    Console.WriteLine("[1/5] Starting smtp4dev via docker compose...");
-    var up = new ProcessStartInfo("docker", $"compose -f \"{composeFile}\" up -d")
-    {
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false
-    };
-    var p = Process.Start(up)!;
-    var stdout = p.StandardOutput.ReadToEnd();
-    var stderr = p.StandardError.ReadToEnd();
-    p.WaitForExit();
-    if (p.ExitCode != 0)
-        throw new Exception($"docker compose failed:\n{stdout}\n{stderr}");
-    Console.WriteLine(stdout.Trim());
-}
-else
-{
-    Console.WriteLine($"[1/5] Using existing smtp4dev on localhost:{smtpPort} / {imapPort}");
-}
+await using var smtp4Dev = new Smtp4DevFixture();
+Console.WriteLine("[1/5] Starting smtp4dev with Testcontainers...");
+await smtp4Dev.StartAsync();
+var smtpPort = smtp4Dev.SmtpPort;
+var imapPort = smtp4Dev.ImapPort;
+Console.WriteLine($"smtp4dev is ready on localhost:{smtpPort} / {imapPort}");
 
 Console.WriteLine("[2/5] Starting EmailMcp server...");
 var env = Environment.GetEnvironmentVariables().Cast<DictionaryEntry>()
@@ -195,50 +181,82 @@ var status = JsonDocument.Parse(ReadFrame());
 Console.WriteLine("[5/5] Status response:");
 Console.WriteLine(status.RootElement.GetRawText());
 
-if (useCompose)
+var subject = "E2E smtp4dev smoke test";
+var body = "This email was sent by the .NET end-to-end smoke test.";
+var from = "sender@example.test";
+var to = "recipient@example.test";
+
+using var smtp = new SmtpClient("localhost", smtpPort)
 {
-    var subject = "E2E smtp4dev smoke test";
-    var body = "This email was sent by the .NET end-to-end smoke test.";
-    var from = "sender@example.test";
-    var to = "recipient@example.test";
+    EnableSsl = false,
+    DeliveryMethod = SmtpDeliveryMethod.Network
+};
 
-    using var smtp = new SmtpClient("localhost", smtpPort)
+using var message = new MailMessage(from, to, subject, body);
+smtp.Send(message);
+
+Console.WriteLine("Sent smoke-test message to smtp4dev.");
+
+var deadline = DateTime.UtcNow.AddSeconds(20);
+while (DateTime.UtcNow < deadline)
+{
+    SendFrame(JsonRpc(4, "tools/call", new Dictionary<string, object?>
     {
-        EnableSsl = false,
-        DeliveryMethod = SmtpDeliveryMethod.Network
-    };
-
-    using var message = new MailMessage(from, to, subject, body);
-    smtp.Send(message);
-
-    Console.WriteLine("Sent smoke-test message to smtp4dev.");
-
-    var deadline = DateTime.UtcNow.AddSeconds(20);
-    while (DateTime.UtcNow < deadline)
-    {
-        SendFrame(JsonRpc(4, "tools/call", new Dictionary<string, object?>
+        ["name"] = "read_email",
+        ["arguments"] = new Dictionary<string, object?>
         {
-            ["name"] = "read_email",
-            ["arguments"] = new Dictionary<string, object?>
-            {
-                ["maxResults"] = 10,
-                ["folder"] = "INBOX"
-            }
-        }));
-
-        var inbox = JsonDocument.Parse(ReadFrame());
-        var content = inbox.RootElement.GetProperty("result").GetProperty("content");
-        var text = content[0].GetProperty("text").GetString();
-        if (text?.Contains(subject, StringComparison.OrdinalIgnoreCase) == true)
-        {
-            Console.WriteLine("Email was found in INBOX via MCP read_email.");
-            return;
+            ["maxResults"] = 10,
+            ["folder"] = "INBOX"
         }
+    }));
 
-        Thread.Sleep(1000);
+    var inbox = JsonDocument.Parse(ReadFrame());
+    var content = inbox.RootElement.GetProperty("result").GetProperty("content");
+    var text = content[0].GetProperty("text").GetString();
+    if (text?.Contains(subject, StringComparison.OrdinalIgnoreCase) == true)
+    {
+        Console.WriteLine("Email was found in INBOX via MCP read_email.");
+        return;
     }
 
-    throw new Exception("The smoke-test message never appeared in INBOX via MCP read_email.");
+    Thread.Sleep(1000);
 }
 
-Console.WriteLine("Current docker image status check completed. Use --compose for the full round-trip test.");
+throw new Exception("The smoke-test message never appeared in INBOX via MCP read_email.");
+
+sealed class Smtp4DevFixture : IAsyncDisposable
+{
+    private readonly INetwork network;
+    private readonly IContainer container;
+
+    public Smtp4DevFixture()
+    {
+        network = new NetworkBuilder()
+            .WithName($"emailmcp-e2e-{Guid.NewGuid():N}")
+            .Build();
+
+        container = new ContainerBuilder()
+            .WithImage("rnwood/smtp4dev:v3")
+            .WithNetwork(network)
+            .WithPortBinding(80, true)
+            .WithPortBinding(25, true)
+            .WithPortBinding(143, true)
+            .WithEnvironment("ServerOptions__Urls", "http://*:80")
+            .WithEnvironment("ServerOptions__HostName", "smtp4dev")
+            .WithVolumeMount("emailmcp-smtp4dev-data", "/smtp4dev")
+            .WithWaitStrategy(Wait.ForUnixContainer()
+                .UntilHttpRequestIsSucceeded(request => request.ForPort(80)))
+            .Build();
+    }
+
+    public int SmtpPort => container.GetMappedPublicPort(25);
+    public int ImapPort => container.GetMappedPublicPort(143);
+
+    public Task StartAsync() => container.StartAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        await container.DisposeAsync();
+        await network.DisposeAsync();
+    }
+}

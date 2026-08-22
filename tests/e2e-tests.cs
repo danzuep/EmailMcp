@@ -57,48 +57,24 @@ var stderrTask = proc.StandardError.ReadToEndAsync();
 
 string ReadFrame()
 {
-    var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    while (true)
+    // The MCP server outputs a single complete JSON object per line.
+    var line = proc.StandardOutput.ReadLine();
+    
+    if (line is null)
     {
-        var line = proc.StandardOutput.ReadLine();
-        if (line is null)
-        {
-            var stderr = stderrTask.GetAwaiter().GetResult();
-            throw new InvalidOperationException(
-                $"EmailMcp exited with code {proc.ExitCode} before sending an MCP frame.\n{stderr}");
-        }
-        if (string.IsNullOrEmpty(line))
-            break;
-        var idx = line.IndexOf(':');
-        if (idx <= 0)
-            throw new InvalidOperationException($"Malformed MCP header: {line}");
-        headers[line[..idx]] = line[(idx + 1)..].Trim();
+        var stderr = stderrTask.GetAwaiter().GetResult();
+        throw new InvalidOperationException(
+            $"EmailMcp exited with code {proc.ExitCode} before sending an MCP frame.\n{stderr}");
     }
-
-    if (!headers.TryGetValue("Content-Length", out var lengthText))
-        throw new InvalidOperationException("Missing Content-Length header");
-
-    var length = int.Parse(lengthText, CultureInfo.InvariantCulture);
-    var buffer = new char[length];
-    var read = 0;
-    while (read < length)
-    {
-        var chunk = proc.StandardOutput.Read(buffer, read, length - read);
-        if (chunk == 0)
-            throw new InvalidOperationException("Process ended before full message body was read");
-        read += chunk;
-    }
-
-    return new string(buffer);
+    
+    return line; 
 }
 
 void SendFrame(string json)
 {
-    var body = Encoding.UTF8.GetBytes(json);
-    var frame = Encoding.ASCII.GetBytes($"Content-Length: {body.Length}\r\n\r\n");
-    proc.StandardInput.BaseStream.Write(frame, 0, frame.Length);
-    proc.StandardInput.BaseStream.Write(body, 0, body.Length);
-    proc.StandardInput.BaseStream.Flush();
+    // StandardInput is a StreamWriter, so we can just use WriteLine to append the required newline.
+    proc.StandardInput.WriteLine(json);
+    proc.StandardInput.Flush();
 }
 
 static string EscapeJson(string value) => value
@@ -265,7 +241,9 @@ sealed class Smtp4DevFixture : IAsyncDisposable
             .WithEnvironment("ServerOptions__HostName", "smtp4dev")
             .WithVolumeMount("emailmcp-smtp4dev-data", "/smtp4dev")
             .WithWaitStrategy(Wait.ForUnixContainer()
-                .UntilHttpRequestIsSucceeded(request => request.ForPort(80)))
+                .UntilHttpRequestIsSucceeded(request => request.ForPort(80))
+                .UntilInternalTcpPortIsAvailable(25)
+                .UntilInternalTcpPortIsAvailable(143))
             .Build();
     }
 

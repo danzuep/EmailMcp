@@ -33,13 +33,14 @@ builder.Logging.ClearProviders();
 // 2. Force ALL console logs to stderr by setting the threshold to the lowest level (Trace)
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-// builder.Logging.AddFilter("ModelContextProtocol", LogLevel.Error);
-// builder.Logging.AddFilter("ModelContextProtocol.Server.StdioServerTransport", LogLevel.Error);
-// builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
-// builder.Logging.AddSerilog(Log.Logger, dispose: true);
+builder.Logging.AddFilter("ModelContextProtocol", LogLevel.Error);
+builder.Logging.AddFilter("ModelContextProtocol.Server.StdioServerTransport", LogLevel.Error);
+builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
+builder.Logging.AddSerilog(Log.Logger, dispose: true);
 
 var appsettingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
 builder.Configuration.AddJsonFile(appsettingsPath, optional: false, reloadOnChange: false);
+builder.Configuration.AddEnvironmentVariables();
 
 var senderSection = builder.Configuration.GetSection("EmailSender");
 var receiverSection = builder.Configuration.GetSection("EmailReceiver");

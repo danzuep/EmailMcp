@@ -60,10 +60,18 @@ namespace EmailMcp
 
                 if (uniqueId is null)
                 {
-                    var summaries = await imapReceiver.ReadMail
-                        .Top(maxResults)
-                        .ItemsForMimeMessages()
-                        .GetMessageSummariesAsync(ct);
+                    IList<IMessageSummary> summaries;
+                    try
+                    {
+                        summaries = await imapReceiver.ReadMail
+                            .Top(maxResults)
+                            .ItemsForMimeMessages()
+                            .GetMessageSummariesAsync(ct);
+                    }
+                    catch (ArgumentOutOfRangeException ex) when (ex.ParamName == "min")
+                    {
+                        summaries = Array.Empty<IMessageSummary>();
+                    }
 
                     var results = new List<EmailResult>(summaries.Count);
                     foreach (var s in summaries)

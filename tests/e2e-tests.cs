@@ -37,7 +37,7 @@ using var proc = new Process
     StartInfo = new ProcessStartInfo
     {
         FileName = "dotnet",
-        Arguments = "run --project src/EmailMcp.csproj",
+        Arguments = "run --no-launch-profile --project src/EmailMcp.csproj",
         WorkingDirectory = Directory.GetCurrentDirectory(),
         RedirectStandardInput = true,
         RedirectStandardOutput = true,
@@ -53,6 +53,8 @@ foreach (var kvp in env)
 if (!proc.Start())
     throw new Exception("Failed to start EmailMcp process.");
 
+var stderrTask = proc.StandardError.ReadToEndAsync();
+
 string ReadFrame()
 {
     var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -60,7 +62,11 @@ string ReadFrame()
     {
         var line = proc.StandardOutput.ReadLine();
         if (line is null)
-            throw new InvalidOperationException("Process closed while reading MCP frame");
+        {
+            var stderr = stderrTask.GetAwaiter().GetResult();
+            throw new InvalidOperationException(
+                $"EmailMcp exited with code {proc.ExitCode} before sending an MCP frame.\n{stderr}");
+        }
         if (string.IsNullOrEmpty(line))
             break;
         var idx = line.IndexOf(':');
@@ -114,6 +120,16 @@ static string BuildJsonValue(object? value)
     if (value is double d) return d.ToString(CultureInfo.InvariantCulture);
     if (value is decimal dec) return dec.ToString(CultureInfo.InvariantCulture);
     if (value is DateTime dt) return JsonString(dt.ToString("O", CultureInfo.InvariantCulture));
+    if (value is IDictionary dictionary)
+    {
+        var dictionaryProperties = new List<string>();
+        foreach (DictionaryEntry entry in dictionary)
+        {
+            dictionaryProperties.Add(JsonString(entry.Key?.ToString() ?? "") + ":" + BuildJsonValue(entry.Value));
+        }
+
+        return "{" + string.Join(",", dictionaryProperties) + "}";
+    }
     if (value is IEnumerable enumerable && value is not string)
     {
         var items = new List<string>();
@@ -125,7 +141,11 @@ static string BuildJsonValue(object? value)
     var json = new StringBuilder();
     json.Append('{');
     var first = true;
-    foreach (var p in value.GetType().GetProperties())
+    var type = value.GetType();
+#pragma warning disable IL2075
+    var properties = type.GetProperties();
+#pragma warning restore IL2075
+    foreach (var p in properties)
     {
         if (p.GetIndexParameters().Length > 0) continue;
         if (!first) json.Append(',');

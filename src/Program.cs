@@ -27,12 +27,16 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.Debug()
     .CreateLogger();
 
-// Keep stdout clean for MCP stdio transport. Only errors go to stderr console.
-builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Error);
-builder.Logging.AddFilter("ModelContextProtocol", LogLevel.Error);
-builder.Logging.AddFilter("ModelContextProtocol.Server.StdioServerTransport", LogLevel.Error);
-builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
-builder.Logging.AddSerilog(Log.Logger, dispose: true);
+// 1. MUST clear default providers added by Host.CreateApplicationBuilder
+builder.Logging.ClearProviders();
+
+// 2. Force ALL console logs to stderr by setting the threshold to the lowest level (Trace)
+builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+
+// builder.Logging.AddFilter("ModelContextProtocol", LogLevel.Error);
+// builder.Logging.AddFilter("ModelContextProtocol.Server.StdioServerTransport", LogLevel.Error);
+// builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
+// builder.Logging.AddSerilog(Log.Logger, dispose: true);
 
 var appsettingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
 builder.Configuration.AddJsonFile(appsettingsPath, optional: false, reloadOnChange: false);

@@ -42,7 +42,7 @@ namespace EmailMcp
             "is supplied. Returns JSON with UniqueId, MessageId, headers, Markdown body, " +
             "and attachment metadata.")]
         public static async Task<string> ReadEmailAsync(
-            ImapReceiver imapReceiver,
+            EmailService emailService,
             [Description("Maximum number of messages (1-25). Ignored when uniqueId is set.")]
             int maxResults = 5,
             [Description("IMAP folder. Default: INBOX.")]
@@ -51,10 +51,11 @@ namespace EmailMcp
             uint? uniqueId = null,
             CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(imapReceiver);
+            ArgumentNullException.ThrowIfNull(emailService);
             var sw = Stopwatch.StartNew();
             try
             {
+                using var imapReceiver = emailService.CreateReceiver();
                 maxResults = Clamp(maxResults);
 
                 if (uniqueId is null)
@@ -95,17 +96,18 @@ namespace EmailMcp
             "Search an IMAP folder. Returns UniqueId, Date, From, To, Subject. " +
             "searchField: all | subject | from | unread | read.")]
         public static async Task<string> SearchEmailsAsync(
-            ImapReceiver imapReceiver,
+            EmailService emailService,
             [Description("Search term (required for all/subject/from).")] string? searchTerm = null,
             [Description("Field: all, subject, from, unread, or read.")] string searchField = "all",
             [Description("Max results (1-25).")] int maxResults = 10,
             [Description("IMAP folder. Default: INBOX.")] string folder = "INBOX",
             CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(imapReceiver);
+            ArgumentNullException.ThrowIfNull(emailService);
             var sw = Stopwatch.StartNew();
             try
             {
+                using var imapReceiver = emailService.CreateReceiver();
                 maxResults = Clamp(maxResults);
                 var query = BuildQuery(searchTerm, searchField);
 
@@ -135,13 +137,14 @@ namespace EmailMcp
         [McpServerTool(Name = "list_folders", ReadOnly = true)]
         [Description("List IMAP folders/mailboxes on the server.")]
         public static async Task<string> ListFoldersAsync(
-            IImapReceiver imapReceiver,
+            EmailService emailService,
             CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(imapReceiver);
+            ArgumentNullException.ThrowIfNull(emailService);
             var sw = Stopwatch.StartNew();
             try
             {
+                using var imapReceiver = emailService.CreateReceiver();
                 var names = await imapReceiver.GetMailFolderNamesAsync(ct);
                 return Ok(new { folders = names });
             }
@@ -154,17 +157,18 @@ namespace EmailMcp
         [McpServerTool(Name = "get_status", ReadOnly = true)]
         [Description("Check IMAP connectivity without downloading messages.")]
         public static async Task<string> GetStatusAsync(
-            IMailFolderClient mailFolderClient,
+            EmailService emailService,
             CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(mailFolderClient);
+            ArgumentNullException.ThrowIfNull(emailService);
             var sw = Stopwatch.StartNew();
             try
             {
+                using var imapReceiver = emailService.CreateReceiver();
                 string? imapError = null;
                 try
                 {
-                    _ = await mailFolderClient.ConnectAsync(false, ct);
+                    _ = await imapReceiver.ConnectAuthenticatedImapClientAsync(ct);
                 }
                 catch (Exception ex)
                 {
@@ -193,7 +197,7 @@ namespace EmailMcp
             "Send via SMTP. Requires SMTP_* env vars and SEND_EMAIL_ENABLED=true. " +
             "Recipients must match SEND_ALLOW_LIST (addresses or *@domain.com).")]
         public static async Task<string> SendEmailAsync(
-            ISmtpSender smtpSender,
+            EmailService emailService,
             [Description("Recipient (required).")] string to,
             [Description("Subject (required).")] string subject,
             [Description("Body (plain or HTML).")] string body,
@@ -202,10 +206,11 @@ namespace EmailMcp
             [Description("Optional BCC, comma-separated.")] string? bcc = null,
             CancellationToken ct = default)
         {
-            ArgumentNullException.ThrowIfNull(smtpSender);
+            ArgumentNullException.ThrowIfNull(emailService);
             var sw = Stopwatch.StartNew();
             try
             {
+                using var smtpSender = emailService.CreateSender();
                 if (!IsSendEnabled())
                     return Fail("Sending disabled. Set SEND_EMAIL_ENABLED=true and SMTP_HOST/USER/PASSWORD (and optionally SEND_ALLOW_LIST).");
 
